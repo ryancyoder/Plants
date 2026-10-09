@@ -341,12 +341,17 @@ export function PlantReferenceClient() {
 
   // "Larger" drops the column count ~1/3 at each breakpoint, so tiles render
   // roughly 50% bigger. Shared by every gallery grid on this page.
+  // Columns keep going past `lg`, which they did not need to when this was one
+  // page inside a wider app: there the container stopped at 72rem, so breakpoints
+  // above it had nothing to divide. Now the catalog is the whole window, and on a
+  // wide monitor the width should turn into more plants rather than larger ones --
+  // how large they are is what the tile toggle is for.
   const galleryGrid = bigTiles
-    ? "grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4"
-    : "grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5";
+    ? "grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 min-[1920px]:grid-cols-7 min-[2560px]:grid-cols-8"
+    : "grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-7 min-[1920px]:grid-cols-9 min-[2560px]:grid-cols-11";
 
   return (
-    <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-8 sm:px-6">
+    <main className="w-full flex-1 px-4 py-8 sm:px-6">
       <div className="mb-4 flex items-start justify-between gap-4">
         <div>
           <h1 className="text-xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-50">Plant Reference</h1>

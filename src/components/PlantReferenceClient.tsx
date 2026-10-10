@@ -380,15 +380,18 @@ export function PlantReferenceClient() {
 
   return (
     <main className="w-full flex-1 px-4 py-8 sm:px-6">
-      <div className="mb-4 flex items-start justify-between gap-4">
-        <div>
-          <h1 className="text-xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-50">Plant Reference</h1>
-          <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
-            {inCombinations
-              ? `Combinations — ${visibleCombos.length.toLocaleString()} multi-plant photo${visibleCombos.length === 1 ? "" : "s"}.`
-              : `Horticultural catalog — ${active.total ? active.total.toLocaleString() : ""} ${noun}, searchable by conditions, size, and traits.`}
-          </p>
-        </div>
+      {/* Title, what you are looking at, and the controls -- one bar. The line in
+          the middle used to sit under the title on a row of its own, which bought
+          a line of height for a sentence that is really a caption to the heading.
+          It takes the space left between the two fixed ends, so it centres in the
+          bar; below `sm` there is no such space and it drops back under the title. */}
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-x-4">
+        <h1 className="shrink-0 text-xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-50">Plant Reference</h1>
+        <p className="order-last mt-1 w-full text-sm text-zinc-500 sm:order-none sm:mt-0 sm:w-auto sm:min-w-0 sm:flex-1 sm:truncate sm:text-center dark:text-zinc-400">
+          {inCombinations
+            ? `Combinations — ${visibleCombos.length.toLocaleString()} multi-plant photo${visibleCombos.length === 1 ? "" : "s"}.`
+            : `Horticultural catalog — ${active.total ? active.total.toLocaleString() : ""} ${noun}, searchable by conditions, size, and traits.`}
+        </p>
         <div className="flex shrink-0 items-center gap-2">
           {!locked && (
             <button

@@ -531,6 +531,12 @@ export function PlantReferenceClient() {
           )}
           {!inCombinations && (
             <>
+              {/* Six categories were six chips on a row of their own, and five of
+                  them were always the wrong answer. As a select it is one control
+                  the width of its longest label, in line with the other filters --
+                  and the empty option is the old "All", so nothing changes about
+                  what it means to pick nothing. */}
+              <Select value={category} onChange={(v) => { setCategory(v); setPage(1); }} placeholder="All categories" options={PLANT_CATEGORIES} />
               <Select value={sun} onChange={(v) => { setSun(v); setPage(1); }} placeholder="Any sun" options={SUN_OPTIONS} />
               <Select value={moisture} onChange={(v) => { setMoisture(v); setPage(1); }} placeholder="Any moisture" options={MOISTURE_OPTIONS} />
               <Toggle label="Native" active={native} onClick={() => { setNative((v) => !v); setPage(1); }} />
@@ -544,14 +550,6 @@ export function PlantReferenceClient() {
             </>
           )}
         </div>
-        {!inCombinations && (
-          <div className="flex flex-wrap gap-2">
-            <Chip label="All" active={category === ""} onClick={() => { setCategory(""); setPage(1); }} />
-            {PLANT_CATEGORIES.map((c) => (
-              <Chip key={c} label={c} active={category === c} onClick={() => { setCategory(c); setPage(1); }} />
-            ))}
-          </div>
-        )}
       </div>
 
       {/* Combinations tied to the drilled-into species (a section above the cultivars). */}
@@ -937,21 +935,6 @@ function GroupBtn({ label, active, onClick }: { label: string; active: boolean; 
         active
           ? "bg-white text-zinc-900 shadow-sm dark:bg-zinc-950 dark:text-zinc-100"
           : "text-zinc-500 hover:text-zinc-800 dark:text-zinc-400 dark:hover:text-zinc-200"
-      }`}
-    >
-      {label}
-    </button>
-  );
-}
-
-function Chip({ label, active, onClick }: { label: string; active: boolean; onClick: () => void }) {
-  return (
-    <button
-      onClick={onClick}
-      className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
-        active
-          ? "bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900"
-          : "border border-zinc-300 text-zinc-600 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
       }`}
     >
       {label}

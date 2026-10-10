@@ -99,6 +99,34 @@ export function PlantReferenceClient() {
   const [stampsLoading, setStampsLoading] = useState(false);
   const [selectedStamp, setSelectedStamp] = useState<LibraryItem | null>(null);
 
+  const searchRef = useRef<HTMLInputElement>(null);
+  // Every dialog this page can raise. `/` must not pull focus out from under one
+  // of them -- typing a caption or a cultivar name is exactly where a stray
+  // slash belongs in the text, not in a search box behind the overlay. `drill`
+  // is not in the list: an album is a view, not a dialog, and searching inside
+  // one is the normal thing to want.
+  const dialogOpen = !!(
+    selected || editing || creatingPlant || selectedCombo || editingCombo || selectedStamp
+  );
+
+  // `/` jumps to the search box, the way it does in a browser's find and in most
+  // things that are mostly a list. Ignored while a dialog is up, and while the
+  // caret is already in a field, so it stays a literal slash whenever one could
+  // reasonably be typed.
+  useEffect(() => {
+    if (dialogOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "/" || e.metaKey || e.ctrlKey || e.altKey) return;
+      const el = e.target as HTMLElement | null;
+      if (el && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName))) return;
+      e.preventDefault();
+      searchRef.current?.focus();
+      searchRef.current?.select();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [dialogOpen]);
+
   // Showing the album grid (grouped mode, not drilled into a species).
   const inAlbumList = groupMode === "albums" && !drill;
   // Showing the flat combinations list (Combinations tab, not drilled).
@@ -463,12 +491,27 @@ export function PlantReferenceClient() {
           <div className="relative w-full max-w-sm">
             <Search size={16} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" />
             <input
+              ref={searchRef}
               type="search"
               value={qInput}
               onChange={(e) => setQInput(e.target.value)}
+              onKeyDown={(e) => {
+                // Escape gives the keyboard back, so `/` is not a one-way door.
+                if (e.key === "Escape") e.currentTarget.blur();
+              }}
               placeholder={inCombinations ? "Search combinations by title or plant…" : "Search botanical, common, or genus…"}
-              className="w-full rounded-full border border-zinc-300 bg-white py-2 pl-9 pr-3 text-sm text-zinc-900 outline-none placeholder:text-zinc-400 focus:border-zinc-400 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
+              className="peer w-full rounded-full border border-zinc-300 bg-white py-2 pl-9 pr-9 text-sm text-zinc-900 outline-none placeholder:text-zinc-400 focus:border-zinc-400 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
             />
+            {!qInput && (
+              // The shortcut is worth nothing if nobody knows it is there. Goes
+              // once the box is focused or has anything in it.
+              <kbd
+                aria-hidden="true"
+                className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 rounded border border-zinc-300 px-1.5 text-[11px] leading-[1.35] text-zinc-400 peer-focus:hidden dark:border-zinc-700 dark:text-zinc-500"
+              >
+                /
+              </kbd>
+            )}
           </div>
           {!inAlbumList && !inCombinations && (
             <select

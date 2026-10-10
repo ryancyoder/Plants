@@ -455,9 +455,11 @@ export function PlantReferenceClient() {
         </div>
       )}
 
-      {/* Grouping toggle / breadcrumb */}
-      <div className="mb-3">
-        {drill ? (
+      {/* The way back out of an album, and the one control that only makes sense
+          inside one. The grouping toggle used to share this row; it sits in the
+          filter row now, so with no album open there is no row here at all. */}
+      {drill && (
+        <div className="mb-3">
           <button
             onClick={closeDrill}
             className="inline-flex items-center gap-1 rounded-full border border-zinc-300 px-3 py-1.5 text-sm font-medium text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-800"
@@ -467,23 +469,16 @@ export function PlantReferenceClient() {
             <span className="italic">{drill.album_key}</span>
             {drill.common ? <span className="text-zinc-400">· {drill.common}</span> : null}
           </button>
-        ) : null}
-        {drill && !locked && (
-          <button
-            onClick={() => setCreatingPlant(seedFromAlbum(drill, plantResult.plants))}
-            className="ml-2 inline-flex items-center gap-1.5 rounded-full bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-700"
-          >
-            <Plus size={16} /> Add cultivar
-          </button>
-        )}
-        {!drill && (
-          <div className="inline-flex rounded-full bg-zinc-100 p-0.5 dark:bg-zinc-800">
-            <GroupBtn label="Albums" active={groupMode === "albums"} onClick={() => switchGroup("albums")} />
-            <GroupBtn label="All plants" active={groupMode === "all"} onClick={() => switchGroup("all")} />
-            <GroupBtn label="Combinations" active={groupMode === "combinations"} onClick={() => switchGroup("combinations")} />
-          </div>
-        )}
-      </div>
+          {!locked && (
+            <button
+              onClick={() => setCreatingPlant(seedFromAlbum(drill, plantResult.plants))}
+              className="ml-2 inline-flex items-center gap-1.5 rounded-full bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-700"
+            >
+              <Plus size={16} /> Add cultivar
+            </button>
+          )}
+        </div>
+      )}
 
       {/* Filters */}
       <div className="mb-4 flex flex-col gap-3">
@@ -513,6 +508,15 @@ export function PlantReferenceClient() {
               </kbd>
             )}
           </div>
+          {!drill && (
+            // Which slice of the catalog you are looking at belongs beside the
+            // things that narrow it, not on a line of its own above them.
+            <div className="flex shrink-0 rounded-full bg-zinc-100 p-0.5 dark:bg-zinc-800">
+              <GroupBtn label="Albums" active={groupMode === "albums"} onClick={() => switchGroup("albums")} />
+              <GroupBtn label="All plants" active={groupMode === "all"} onClick={() => switchGroup("all")} />
+              <GroupBtn label="Combinations" active={groupMode === "combinations"} onClick={() => switchGroup("combinations")} />
+            </div>
+          )}
           {!inAlbumList && !inCombinations && (
             <select
               value={sort}

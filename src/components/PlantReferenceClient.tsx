@@ -458,34 +458,33 @@ export function PlantReferenceClient() {
         </div>
       )}
 
-      {/* The way back out of an album, and the one control that only makes sense
-          inside one. The grouping toggle used to share this row; it sits in the
-          filter row now, so with no album open there is no row here at all. */}
-      {drill && (
-        <div className="mb-3">
-          <button
-            onClick={closeDrill}
-            className="inline-flex items-center gap-1 rounded-full border border-zinc-300 px-3 py-1.5 text-sm font-medium text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-800"
-          >
-            <ChevronLeft size={16} /> Albums
-            <span className="ml-1 text-zinc-400">/</span>
-            <span className="italic">{drill.album_key}</span>
-            {drill.common ? <span className="text-zinc-400">· {drill.common}</span> : null}
-          </button>
-          {!locked && (
-            <button
-              onClick={() => setCreatingPlant(seedFromAlbum(drill, plantResult.plants))}
-              className="ml-2 inline-flex items-center gap-1.5 rounded-full bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-700"
-            >
-              <Plus size={16} /> Add cultivar
-            </button>
-          )}
-        </div>
-      )}
-
       {/* Filters */}
       <div className="mb-4 flex flex-col gap-3">
         <div className="flex flex-wrap items-center gap-3">
+          {/* Inside an album, the way back out and the one action scoped to it.
+              They had a row above the filters to themselves; at the head of this
+              row they read the same way and cost no height. */}
+          {drill && (
+            <>
+              <button
+                onClick={closeDrill}
+                className="inline-flex shrink-0 items-center gap-1 rounded-full border border-zinc-300 px-3 py-1.5 text-sm font-medium text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-800"
+              >
+                <ChevronLeft size={16} /> Albums
+                <span className="ml-1 text-zinc-400">/</span>
+                <span className="italic">{drill.album_key}</span>
+                {drill.common ? <span className="text-zinc-400">· {drill.common}</span> : null}
+              </button>
+              {!locked && (
+                <button
+                  onClick={() => setCreatingPlant(seedFromAlbum(drill, plantResult.plants))}
+                  className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-700"
+                >
+                  <Plus size={16} /> Add cultivar
+                </button>
+              )}
+            </>
+          )}
           <div className="relative w-full max-w-sm">
             <Search size={16} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" />
             <input

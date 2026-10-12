@@ -42,6 +42,18 @@ export const ARRAY_FIELDS = [
   "features",
 ] as const;
 
+// plants.image_scope is a Postgres enum, so an unknown string is a 500 rather
+// than a no-op. Whitelisted separately from the free-text columns for that
+// reason: "" and anything unrecognised become null, which reads as "no claim"
+// and leaves the card unbadged.
+export const IMAGE_SCOPES = ["cultivar", "species", "genus", "unknown"] as const;
+
+export function cleanImageScope(v: unknown): string | null {
+  if (typeof v !== "string") return null;
+  const t = v.trim();
+  return (IMAGE_SCOPES as readonly string[]).includes(t) ? t : null;
+}
+
 export function cleanText(v: unknown): string | null {
   if (typeof v !== "string") return null;
   const t = v.trim();
@@ -73,6 +85,7 @@ export function plantColumnsFromBody(body: Record<string, unknown>): Record<stri
   for (const f of NUMBER_FIELDS) if (f in body) out[f] = cleanNumber(body[f]);
   for (const f of BOOL_FIELDS) if (f in body) out[f] = Boolean(body[f]);
   for (const f of ARRAY_FIELDS) if (f in body) out[f] = cleanArray(body[f]);
+  if ("image_scope" in body) out.image_scope = cleanImageScope(body.image_scope);
   return out;
 }
 

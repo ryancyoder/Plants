@@ -1482,6 +1482,11 @@ function PlantEditor({
     rabbit_resistant: !!plant.rabbit_resistant,
   }));
   const [image, setImage] = useState<string | null>(plant.image);
+  // What the photo on this row claims to show. `null` and "cultivar" both leave
+  // the card unbadged, but they are not the same thing -- one is "nobody has
+  // said", the other is "checked, it is this plant" -- so an unrecorded row is
+  // not silently upgraded to a claim just by opening the editor.
+  const [scope, setScope] = useState<string>(plant.image_scope ?? "");
   // A new row does not exist yet, so its photograph cannot be filed against an
   // id. Hold the chosen file and post it the moment the insert returns one.
   const [pendingFile, setPendingFile] = useState<File | null>(null);
@@ -1509,7 +1514,7 @@ function PlantEditor({
   const save = async () => {
     setSaving(true);
     setError(null);
-    const payload: Record<string, unknown> = { ...form, ...bools };
+    const payload: Record<string, unknown> = { ...form, ...bools, image_scope: scope };
     try {
       const res = await fetch(isCreate ? "/api/plants" : `/api/plants/${targetId}`, {
         method: isCreate ? "POST" : "PATCH",
@@ -1560,6 +1565,9 @@ function PlantEditor({
       }
       const d: { image: string } = await res.json();
       setImage(d.image);
+      // The route records this as cultivar-level evidence; keep the control in
+      // step so the badge does not appear to survive the upload.
+      setScope("cultivar");
       onChanged();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Upload failed");
@@ -1579,6 +1587,7 @@ function PlantEditor({
         throw new Error(d.error || `Remove failed (${res.status})`);
       }
       setImage(null);
+      setScope("");
       onChanged();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Remove failed");
@@ -1653,6 +1662,22 @@ function PlantEditor({
                 {uploading ? <Loader2 size={15} className="animate-spin" /> : <Upload size={15} />}
                 {pendingFile ? "Change chosen photo" : image ? "Replace photo" : "Upload photo"}
               </button>
+              {(image || pendingFile) && (
+                <label className="flex flex-col gap-1">
+                  <span className="text-xs text-zinc-500 dark:text-zinc-400">This photo shows</span>
+                  <select
+                    value={scope}
+                    onChange={(e) => setScope(e.target.value)}
+                    className="cursor-pointer rounded-lg border border-zinc-300 bg-white px-2 py-1 text-sm text-zinc-700 outline-none focus:border-zinc-400 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-200"
+                  >
+                    {scope === "" && <option value="">Not recorded — no badge</option>}
+                    <option value="cultivar">This cultivar — no badge</option>
+                    <option value="species">The species — badged &ldquo;species photo&rdquo;</option>
+                    <option value="genus">The genus — badged &ldquo;genus photo&rdquo;</option>
+                    <option value="unknown">Not checked — badged &ldquo;unverified&rdquo;</option>
+                  </select>
+                </label>
+              )}
               {image && !pendingFile && (
                 <button
                   onClick={removePhoto}

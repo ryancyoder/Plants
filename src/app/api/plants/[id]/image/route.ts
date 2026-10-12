@@ -53,7 +53,20 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
 
   const { data: row, error } = await supabase
     .from("plants")
-    .update({ image: filename, last_updated: new Date().toISOString() })
+    .update({
+      image: filename,
+      // Sitting in front of a plant and choosing a photo for it is the strongest
+      // evidence there is that the photo is of that plant -- so the stand-in
+      // badge must go, rather than sitting on a correct portrait.
+      image_scope: "cultivar",
+      // plantpix's relabel treats a row with an image_source as settled ("a
+      // verified cultivar photo is nobody else's stand-in") and leaves its
+      // label alone. Without this the nightly run would be free to re-judge
+      // the photo you just chose.
+      image_source: "upload",
+      image_verified_at: new Date().toISOString(),
+      last_updated: new Date().toISOString(),
+    })
     .eq("id", plantId)
     .select("id, image")
     .maybeSingle();
@@ -93,7 +106,14 @@ export async function DELETE(_req: NextRequest, { params }: RouteParams) {
 
   const { error } = await supabase
     .from("plants")
-    .update({ image: null, last_updated: new Date().toISOString() })
+    .update({
+      image: null,
+      // No photo, no claim about what a photo shows.
+      image_scope: null,
+      image_source: null,
+      image_verified_at: null,
+      last_updated: new Date().toISOString(),
+    })
     .eq("id", plantId);
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });

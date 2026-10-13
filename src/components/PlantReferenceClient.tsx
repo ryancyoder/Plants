@@ -38,6 +38,7 @@ import {
 import type { Combination, CombinationPlant } from "@/lib/combinations";
 import type { LibraryItem } from "@/lib/design/library";
 import { ReferencePlantPicker } from "@/components/ReferencePlantPicker";
+import { StampEditor } from "@/components/StampEditor";
 import { compressImage } from "@/lib/compressImage";
 
 // A cultivar added from inside an album inherits what that album already knows:
@@ -98,6 +99,10 @@ export function PlantReferenceClient() {
   const [stamps, setStamps] = useState<LibraryItem[]>([]);
   const [stampsLoading, setStampsLoading] = useState(false);
   const [selectedStamp, setSelectedStamp] = useState<LibraryItem | null>(null);
+  // Unlocked, a symbol opens in the editor instead; "new" adds one. stampsKey
+  // refetches only the symbols after a change, not the album's plants.
+  const [editingStamp, setEditingStamp] = useState<LibraryItem | "new" | null>(null);
+  const [stampsKey, setStampsKey] = useState(0);
 
   const searchRef = useRef<HTMLInputElement>(null);
   // Every dialog this page can raise. `/` must not pull focus out from under one
@@ -106,7 +111,7 @@ export function PlantReferenceClient() {
   // is not in the list: an album is a view, not a dialog, and searching inside
   // one is the normal thing to want.
   const dialogOpen = !!(
-    selected || editing || creatingPlant || selectedCombo || editingCombo || selectedStamp
+    selected || editing || creatingPlant || selectedCombo || editingCombo || selectedStamp || editingStamp
   );
 
   // `/` jumps to the search box, the way it does in a browser's find and in most
@@ -261,7 +266,7 @@ export function PlantReferenceClient() {
     return () => {
       active = false;
     };
-  }, [drill, reloadKey]);
+  }, [drill, reloadKey, stampsKey]);
 
   const anyFilter = !!(q || category || sun || moisture || native || deer || evergreen);
   const clearAll = useCallback(() => {
@@ -408,6 +413,7 @@ export function PlantReferenceClient() {
               setEditing(null);
               setCreatingPlant(null);
               setSelected(null);
+              setEditingStamp(null);
             }}
             title={locked ? "Unlock to edit plants and photos" : "Lock (read-only)"}
             aria-label={locked ? "Unlock editing" : "Lock editing"}
@@ -574,20 +580,32 @@ export function PlantReferenceClient() {
         </div>
       )}
 
-      {/* Design library symbols linked to plants in this album. */}
-      {drill && (stampsLoading || stamps.length > 0) && (
+      {/* Design library symbols linked to plants in this album. Locked, the
+          section only appears when there is something to show; unlocked, it is
+          always there, because it is where a symbol gets added. */}
+      {drill && (stampsLoading || stamps.length > 0 || !locked) && (
         <div className="mb-6">
           <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-zinc-700 dark:text-zinc-200">
             <Shapes size={16} className="text-indigo-600" />
             Design symbols
             {!stampsLoading && <span className="font-normal text-zinc-400">({stamps.length})</span>}
+            {!locked && (
+              <button
+                onClick={() => setEditingStamp("new")}
+                className="ml-1 inline-flex items-center gap-1 rounded-full border border-zinc-300 px-2.5 py-1 text-xs font-medium text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-800"
+              >
+                <Plus size={13} /> Add symbol
+              </button>
+            )}
           </div>
           {stampsLoading ? (
             <p className="text-sm text-zinc-400">Loading…</p>
+          ) : stamps.length === 0 ? (
+            <p className="text-sm text-zinc-400">No 2D plan or perspective symbols for this species yet.</p>
           ) : (
             <ul className={galleryGrid}>
               {stamps.map((s) => (
-                <StampCard key={s.id} item={s} onClick={() => setSelectedStamp(s)} />
+                <StampCard key={s.id} item={s} editable={!locked} onClick={() => (locked ? setSelectedStamp(s) : setEditingStamp(s))} />
               ))}
             </ul>
           )}
@@ -898,6 +916,21 @@ export function PlantReferenceClient() {
       )}
       {selected && <PlantDetail plant={selected} onClose={() => setSelected(null)} />}
       {selectedStamp && <StampDetail item={selectedStamp} onClose={() => setSelectedStamp(null)} />}
+      {editingStamp && (
+        <StampEditor
+          item={editingStamp === "new" ? null : editingStamp}
+          albumPlants={plantResult.plants}
+          onClose={() => setEditingStamp(null)}
+          onSaved={() => {
+            setEditingStamp(null);
+            setStampsKey((k) => k + 1);
+          }}
+          onDeleted={() => {
+            setEditingStamp(null);
+            setStampsKey((k) => k + 1);
+          }}
+        />
+      )}
       {editingCombo && (
         <CombinationEditor
           combo={editingCombo === "new" ? null : editingCombo}
@@ -1778,13 +1811,13 @@ function stampLabel(item: LibraryItem): string {
 // A design library symbol (perspective stamp / 2D plan symbol) linked to a
 // plant in the current album. Clicking opens a larger view. Images are
 // transparent PNGs so they sit on a neutral tile with object-contain.
-function StampCard({ item, onClick }: { item: LibraryItem; onClick: () => void }) {
+function StampCard({ item, editable, onClick }: { item: LibraryItem; editable: boolean; onClick: () => void }) {
   const [failed, setFailed] = useState(false);
   const kindLabel = stampKindLabel(item);
   const label = stampLabel(item);
   return (
     <li className="overflow-hidden rounded-xl border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900">
-      <button onClick={onClick} className="group block w-full text-left" title={`${label} · ${kindLabel} — click to enlarge`}>
+      <button onClick={onClick} className="group block w-full text-left" title={`${label} · ${kindLabel} — click to ${editable ? "edit" : "enlarge"}`}>
         <div className="relative flex aspect-square items-center justify-center bg-zinc-50 p-3 dark:bg-zinc-950">
           {item.imageUrl && !failed ? (
             // eslint-disable-next-line @next/next/no-img-element

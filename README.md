@@ -29,7 +29,7 @@ the change is simply there, everywhere.
 |---|---|
 | `plants` | the catalog: 962 rows, genus/species/cultivar and the growing conditions |
 | `plant_images` | every photograph found for a plant, and what was decided about it |
-| `pp_library_items` | design stamps, shown against a drilled-into species |
+| `pp_library_items` | design stamps and 2D plan symbols, shown in a drilled-into species and, unlocked, added and edited there |
 
 `plant_images` carries a status: `accepted` is the cover (at most one),
 **`extra`** is a photograph deliberately kept *beside* the cover, `candidate` is

@@ -20,6 +20,7 @@ import {
   AlertTriangle,
   Shapes,
   Star,
+  Box,
 } from "lucide-react";
 import {
   PLANT_CATEGORIES,
@@ -40,6 +41,8 @@ import type { LibraryItem } from "@/lib/design/library";
 import { ReferencePlantPicker } from "@/components/ReferencePlantPicker";
 import { StampEditor } from "@/components/StampEditor";
 import { compressImage } from "@/lib/compressImage";
+import { PlantModels } from "@/components/PlantModelViewer";
+import { PlantModelsEditor } from "@/components/PlantModelsEditor";
 
 // A cultivar added from inside an album inherits what that album already knows:
 // its genus and species, plus the type/category its siblings carry. Without the
@@ -86,6 +89,11 @@ export function PlantReferenceClient() {
   // was started, so the new row lands in that album instead of floating loose.
   const [creatingPlant, setCreatingPlant] = useState<Partial<Plant> | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
+  // Which plants have a 3D model, as a set of ids. Models arrive a few at a
+  // time, so "where have I got to" gets asked far more often than any one model
+  // gets opened — one request for the whole catalog answers it, rather than a
+  // lookup per card. Keyed to reloadKey so adding a model and saving re-counts.
+  const [modelled, setModelled] = useState<Set<number>>(() => new Set());
   // Combinations: multi-plant photos that surface inside each linked species'
   // album. `combos` holds either the whole-library list (Combinations tab) or
   // the subset tied to the drilled species. editingCombo === "new" opens the
@@ -131,6 +139,20 @@ export function PlantReferenceClient() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [dialogOpen]);
+
+  // One request for the whole catalog's 3D coverage. A failure here is silent on
+  // purpose: an empty set just means no card wears the badge, which is a far
+  // better outcome than a broken catalog over a decoration.
+  useEffect(() => {
+    let live = true;
+    fetch("/api/models/coverage")
+      .then((r) => (r.ok ? r.json() : { plant_ids: [] }))
+      .then((d: { plant_ids?: number[] }) => live && setModelled(new Set(d.plant_ids ?? [])))
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, [reloadKey]);
 
   // Showing the album grid (grouped mode, not drilled into a species).
   const inAlbumList = groupMode === "albums" && !drill;
@@ -777,11 +799,23 @@ export function PlantReferenceClient() {
                     <Star size={14} fill={p.is_choice ? "currentColor" : "none"} />
                   </button>
                 )}
-                {sort.startsWith("height") && p.height_in != null && (
-                  <span className="absolute right-2 top-2 inline-flex items-center rounded-full bg-black/60 px-2 py-0.5 text-xs font-medium text-white">
-                    {formatInches(p.height_in)}
-                  </span>
-                )}
+                {/* Stacked rather than both pinned to the corner: the height
+                    badge and the 3D badge can be on at the same time. */}
+                <div className="absolute right-2 top-2 z-10 flex flex-col items-end gap-1">
+                  {sort.startsWith("height") && p.height_in != null && (
+                    <span className="inline-flex items-center rounded-full bg-black/60 px-2 py-0.5 text-xs font-medium text-white">
+                      {formatInches(p.height_in)}
+                    </span>
+                  )}
+                  {modelled.has(p.id) && (
+                    <span
+                      title="This plant has a 3D model"
+                      className="inline-flex items-center gap-1 rounded-full bg-black/60 px-2 py-0.5 text-xs font-medium text-white"
+                    >
+                      <Box size={11} /> 3D
+                    </span>
+                  )}
+                </div>
                 <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/75 via-black/30 to-transparent px-3 pb-2 pt-8">
                   <p className="truncate text-sm font-medium italic text-white drop-shadow-sm">{p.botanical || "Unknown"}</p>
                   {p.common && <p className="truncate text-xs text-white/80">{p.common}</p>}
@@ -816,6 +850,14 @@ export function PlantReferenceClient() {
                   <td className="px-3 py-1.5">
                     <div className="relative h-10 w-10">
                       <PlantImg image={p.image} alt="" className="h-10 w-10 rounded object-cover" small />
+                      {modelled.has(p.id) && (
+                        <span
+                          title="This plant has a 3D model"
+                          className="absolute -bottom-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900"
+                        >
+                          <Box size={9} />
+                        </span>
+                      )}
                       {drill && (!locked || p.is_choice) && (
                         <button
                           type="button"
@@ -1229,6 +1271,15 @@ function PlantDetail({ plant, onClose }: { plant: Plant; onClose: () => void }) 
               <PlantImg image={plant.image} alt={plant.botanical ?? ""} className="max-h-72 w-full object-cover" />
             </div>
           )}
+          {/* Directly under the cover, because it answers the next question the
+              photograph raises: what this looks like from anywhere else. Renders
+              nothing until a model exists, so most cards are unchanged. */}
+          <PlantModels
+            plantId={plant.id}
+            posterUrl={plantImageUrl(plant.image)}
+            cultivar={plant.cultivar}
+            botanical={plant.botanical}
+          />
           <ExtraPhotos plantId={plant.id} botanical={plant.botanical} />
           <dl className="grid grid-cols-1 gap-x-6 gap-y-2 sm:grid-cols-2">
             {rows.map((r) => (
@@ -1730,6 +1781,16 @@ function PlantEditor({
             </p>
           ) : (
             <ExtrasEditor plantId={targetId} />
+          )}
+
+          {/* 3D models. Same rule as the photographs: a row has to exist before
+              a file can be filed against it. */}
+          {isCreate ? (
+            <p className="mb-5 rounded-lg border border-dashed border-zinc-300 px-3 py-2 text-xs text-zinc-500 dark:border-zinc-700 dark:text-zinc-400">
+              Save the cultivar first, then a 3D model can be added to it.
+            </p>
+          ) : (
+            <PlantModelsEditor plantId={targetId} cultivar={form.cultivar || plant.cultivar} />
           )}
 
           {/* Fields */}

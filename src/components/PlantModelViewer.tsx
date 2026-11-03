@@ -6,7 +6,7 @@ import {
   formatBytes,
   modelStandInLabel,
   type ModelScope,
-  type PlantModel,
+  type PlantModelWithUrls as ModelWithUrl,
 } from "@/lib/plantModels";
 
 // <model-viewer> is a web component, so React only needs to know the tag exists.
@@ -40,8 +40,6 @@ declare module "react" {
     }
   }
 }
-
-type ModelWithUrl = PlantModel & { url?: string | null };
 
 // A plant, turned around.
 //

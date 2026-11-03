@@ -41,7 +41,13 @@ import type { LibraryItem } from "@/lib/design/library";
 import { ReferencePlantPicker } from "@/components/ReferencePlantPicker";
 import { StampEditor } from "@/components/StampEditor";
 import { compressImage } from "@/lib/compressImage";
-import { PlantModels } from "@/components/PlantModelViewer";
+import { PlantModels, PlantModelViewer } from "@/components/PlantModelViewer";
+import {
+  formatBytes,
+  modelStandInLabel,
+  type ModelScope,
+  type PlantModelWithUrls,
+} from "@/lib/plantModels";
 import { PlantModelsEditor } from "@/components/PlantModelsEditor";
 
 // A cultivar added from inside an album inherits what that album already knows:
@@ -60,6 +66,23 @@ function seedFromAlbum(album: PlantAlbum, siblings: Plant[]): Partial<Plant> {
     category: sibling?.category ?? null,
   };
 }
+
+// A model as the album section sees it: the row, its two derived URLs, the
+// plant the geometry actually hangs on, and whether that plant is in this album
+// at all. `in_album: false` is a genus-wide stand-in borrowed from a sibling
+// album — real for a rendering of these plants, which is why it is shown, but
+// badged so it is never mistaken for a model of them.
+type AlbumModel = PlantModelWithUrls & {
+  plant: {
+    id: number;
+    botanical: string | null;
+    genus: string | null;
+    species: string | null;
+    cultivar: string | null;
+    common: string | null;
+  };
+  in_album: boolean;
+};
 
 export function PlantReferenceClient() {
   const [qInput, setQInput] = useState("");
@@ -111,6 +134,17 @@ export function PlantReferenceClient() {
   // refetches only the symbols after a change, not the album's plants.
   const [editingStamp, setEditingStamp] = useState<LibraryItem | "new" | null>(null);
   const [stampsKey, setStampsKey] = useState(0);
+  // 3D models belonging to the drilled-into album, shown as a gallery beside
+  // the design symbols. Fetched per album rather than read out of `modelled`
+  // (which is only a set of ids for the badge) because a tile needs the
+  // thumbnail, the scope and which plant it came from.
+  const [albumModels, setAlbumModels] = useState<AlbumModel[]>([]);
+  // Which album the rows in `albumModels` describe. Kept instead of a loading
+  // flag so the effect sets nothing synchronously: "still loading" is just
+  // "the rows I am holding are not this album's yet", which is derived rather
+  // than stored, and cannot get out of step with the fetch.
+  const [albumModelsKey, setAlbumModelsKey] = useState<string | null>(null);
+  const [selectedModel, setSelectedModel] = useState<AlbumModel | null>(null);
 
   const searchRef = useRef<HTMLInputElement>(null);
   // Every dialog this page can raise. `/` must not pull focus out from under one
@@ -289,6 +323,42 @@ export function PlantReferenceClient() {
       active = false;
     };
   }, [drill, reloadKey, stampsKey]);
+
+  // 3D models for the drilled-into album. Same shape of request as the design
+  // symbols above, and deliberately the same cadence: an album is opened far
+  // more often than its models change.
+  useEffect(() => {
+    // Nothing to fetch outside an album, and the section is not rendered there,
+    // so the rows are simply left alone rather than cleared — clearing would be
+    // a synchronous write for a view nobody is looking at.
+    if (!drill) return;
+    let active = true;
+    const key = drill.album_key;
+    const params = new URLSearchParams();
+    params.set("genus", drill.genus ?? "");
+    params.set("species", drill.species ?? "");
+    fetch(`/api/models/for-species?${params.toString()}`)
+      .then((r) => (r.ok ? r.json() : { models: [] }))
+      .then((d: { models?: AlbumModel[] }) => {
+        if (!active) return;
+        setAlbumModels(d.models ?? []);
+        setAlbumModelsKey(key);
+      })
+      .catch(() => {
+        if (!active) return;
+        // A failed fetch still stamps the key: the album genuinely has no
+        // models to show, and leaving it unstamped would spin for ever.
+        setAlbumModels([]);
+        setAlbumModelsKey(key);
+      });
+    return () => {
+      active = false;
+    };
+  }, [drill, reloadKey]);
+
+  // Rows from a previously opened album must never be drawn under a new one's
+  // heading, so the gallery waits until the key matches what is on screen.
+  const albumModelsLoading = !!drill && albumModelsKey !== drill.album_key;
 
   const anyFilter = !!(q || category || sun || moisture || native || deer || evergreen);
   const clearAll = useCallback(() => {
@@ -634,6 +704,32 @@ export function PlantReferenceClient() {
         </div>
       )}
 
+      {/* 3D models for this album, in the same gallery shape as the design
+          symbols above — the two answer the same kind of question about a
+          species, so they read as one row of shelves rather than two features.
+          Only ever shown when there is something to show: adding a model still
+          belongs to a single plant (unlock → open the plant → 3D models). */}
+      {drill && (albumModelsLoading || albumModels.length > 0) && (
+        <div className="mb-6">
+          <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-zinc-700 dark:text-zinc-200">
+            <Box size={16} className="text-emerald-600" />
+            3D models
+            {!albumModelsLoading && (
+              <span className="font-normal text-zinc-400">({albumModels.length})</span>
+            )}
+          </div>
+          {albumModelsLoading ? (
+            <p className="text-sm text-zinc-400">Loading…</p>
+          ) : (
+            <ul className={galleryGrid}>
+              {albumModels.map((m) => (
+                <ModelCard key={m.id} model={m} onClick={() => setSelectedModel(m)} />
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+
       {/* Results */}
       {loading || (inCombinations && comboLoading) ? (
         <p className="text-sm text-zinc-400">Loading…</p>
@@ -958,6 +1054,9 @@ export function PlantReferenceClient() {
       )}
       {selected && <PlantDetail plant={selected} onClose={() => setSelected(null)} />}
       {selectedStamp && <StampDetail item={selectedStamp} onClose={() => setSelectedStamp(null)} />}
+      {selectedModel && (
+        <ModelDetail model={selectedModel} onClose={() => setSelectedModel(null)} />
+      )}
       {editingStamp && (
         <StampEditor
           item={editingStamp === "new" ? null : editingStamp}
@@ -1947,6 +2046,161 @@ function StampDetail({ item, onClose }: { item: LibraryItem; onClose: () => void
     </div>
   );
 }
+
+// A 3D model tile in a species album.
+//
+// Deliberately the same object as a StampCard: square, neutral tile,
+// object-contain, label underneath. A model and a plan symbol are both "another
+// way of drawing this plant", so making them look alike is the point — the
+// album reads as one gallery instead of two unrelated widgets.
+//
+// It shows the *rendered still*, not a live viewer. Six live <model-viewer>
+// elements in one album would be six WebGL contexts and six GLB downloads for a
+// page the user is only scanning; the turnable model is one click away in the
+// detail. A missing still falls back to the cube icon rather than an empty box,
+// because most models predate thumbnails and a blank tile reads as breakage.
+function ModelCard({ model, onClick }: { model: AlbumModel; onClick: () => void }) {
+  const [failed, setFailed] = useState(false);
+  const label =
+    model.plant.cultivar || model.plant.botanical || model.caption || "Model";
+  const borrowed = !model.in_album;
+  return (
+    <li className="overflow-hidden rounded-xl border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900">
+      <button
+        onClick={onClick}
+        className="group block w-full text-left"
+        title={`${label}${borrowed ? " — genus stand-in" : ""} — click to turn it`}
+      >
+        <div className="relative flex aspect-square items-center justify-center bg-zinc-50 p-3 dark:bg-zinc-950">
+          {model.posterUrl && !failed ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={model.posterUrl}
+              alt={label}
+              loading="lazy"
+              className="max-h-full max-w-full object-contain transition-transform group-hover:scale-105"
+              onError={() => setFailed(true)}
+            />
+          ) : (
+            <Box size={28} className="text-zinc-300 dark:text-zinc-600" />
+          )}
+          {model.status === "primary" && model.in_album && (
+            <span className="absolute left-2 top-2 inline-flex items-center gap-1 rounded-full bg-black/60 px-2 py-0.5 text-[11px] font-medium text-white">
+              <Star size={9} /> primary
+            </span>
+          )}
+          {borrowed && (
+            <span
+              title="A genus-wide model standing in for these plants"
+              className="absolute left-2 top-2 rounded-full bg-amber-500/90 px-2 py-0.5 text-[11px] font-medium text-white"
+            >
+              stand-in
+            </span>
+          )}
+          <span className="absolute right-2 top-2 rounded-full bg-black/60 px-2 py-0.5 text-[11px] font-medium text-white">
+            {model.triangles != null ? `${Math.round(model.triangles / 1000)}k tri` : "3D"}
+          </span>
+        </div>
+        <div className="border-t border-zinc-100 px-2 py-1.5 dark:border-zinc-800">
+          <p className="truncate text-xs italic text-zinc-600 dark:text-zinc-300">{label}</p>
+        </div>
+      </button>
+    </li>
+  );
+}
+
+// One model, turnable, with the provenance that decides whether it can be shown
+// to a client. Reuses PlantModelViewer so there is exactly one piece of code
+// that knows how to light a plant.
+function ModelDetail({ model, onClose }: { model: AlbumModel; onClose: () => void }) {
+  const standIn = modelStandInLabel(
+    model.model_scope as ModelScope | null,
+    model.plant.cultivar,
+  );
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+      onClick={onClose}
+    >
+      <div
+        className="max-h-full w-full max-w-2xl overflow-hidden rounded-2xl bg-white shadow-xl dark:bg-zinc-900"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-start justify-between gap-3 border-b border-zinc-100 px-5 py-3 dark:border-zinc-800">
+          <div className="min-w-0">
+            <h2 className="truncate text-base font-semibold italic text-zinc-900 dark:text-zinc-50">
+              {model.plant.botanical || "Model"}
+            </h2>
+            {model.plant.common && (
+              <p className="truncate text-sm text-zinc-500 dark:text-zinc-400">
+                {model.plant.common}
+              </p>
+            )}
+          </div>
+          <button
+            onClick={onClose}
+            aria-label="Close"
+            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800"
+          >
+            <X size={16} />
+          </button>
+        </div>
+        <div className="max-h-[70vh] overflow-y-auto px-5 py-4">
+          {!model.in_album && (
+            <p className="mb-3 flex items-start gap-1.5 rounded-md bg-amber-50 px-2 py-1 text-xs text-amber-800 dark:bg-amber-950 dark:text-amber-200">
+              <AlertTriangle size={13} className="mt-0.5 shrink-0" />
+              This model belongs to {model.plant.botanical || "another plant"} and is standing in
+              for this album at genus scope. A rendering of these plants gets it because nothing
+              closer exists.
+            </p>
+          )}
+          <PlantModelViewer
+            model={model}
+            posterUrl={model.posterUrl}
+            cultivar={model.plant.cultivar}
+            alt={model.plant.botanical}
+            className="h-80"
+          />
+          {standIn && (
+            <p className="mb-3 flex items-start gap-1.5 text-xs text-amber-700 dark:text-amber-300">
+              <AlertTriangle size={13} className="mt-0.5 shrink-0" />
+              {standIn.full}
+            </p>
+          )}
+          <dl className="grid grid-cols-2 gap-x-6 gap-y-1.5 text-sm">
+            <ModelFact label="Scope" value={model.model_scope ?? "unstated"} />
+            <ModelFact label="Status" value={model.status} />
+            <ModelFact
+              label="Height"
+              value={model.height_in != null ? formatInches(model.height_in) : "—"}
+            />
+            <ModelFact
+              label="Triangles"
+              value={model.triangles != null ? model.triangles.toLocaleString() : "—"}
+            />
+            <ModelFact label="File" value={formatBytes(model.bytes)} />
+            <ModelFact label="Source" value={model.source || "—"} />
+          </dl>
+          {model.notes && (
+            <p className="mt-3 border-t border-zinc-100 pt-3 text-xs text-zinc-500 dark:border-zinc-800 dark:text-zinc-400">
+              {model.notes}
+            </p>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ModelFact({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex justify-between gap-4 border-b border-zinc-50 py-1 dark:border-zinc-800/60">
+      <dt className="text-xs text-zinc-400">{label}</dt>
+      <dd className="text-right text-sm text-zinc-700 dark:text-zinc-300">{value}</dd>
+    </div>
+  );
+}
+
 
 function CombinationCard({ combo, onClick }: { combo: Combination; onClick: () => void }) {
   const names = combo.plants.map((p) => p.botanical || p.common).filter(Boolean).join(", ");

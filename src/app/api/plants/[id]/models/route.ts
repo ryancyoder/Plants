@@ -7,7 +7,9 @@ import {
   cleanModelStatus,
   formatFromFileName,
   looksLikeGlb,
+  plantModelPosterUrl,
   plantModelUrl,
+  posterStoragePath,
   type PlantModel,
 } from "@/lib/plantModels";
 
@@ -90,7 +92,11 @@ export async function GET(_req: NextRequest, { params }: RouteParams) {
   models.sort((a, b) => (a.status === "primary" ? -1 : b.status === "primary" ? 1 : 0));
 
   return NextResponse.json({
-    models: models.map((m) => ({ ...m, url: plantModelUrl(m.storage_path) })),
+    models: models.map((m) => ({
+      ...m,
+      url: plantModelUrl(m.storage_path),
+      posterUrl: plantModelPosterUrl(m.storage_path),
+    })),
   });
 }
 
@@ -189,7 +195,13 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
 
   const model = row as unknown as PlantModel;
   return NextResponse.json(
-    { model: { ...model, url: plantModelUrl(model.storage_path) } },
+    {
+      model: {
+        ...model,
+        url: plantModelUrl(model.storage_path),
+        posterUrl: plantModelPosterUrl(model.storage_path),
+      },
+    },
     { status: 201 },
   );
 }
@@ -256,7 +268,13 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
   }
 
   const model = row as unknown as PlantModel;
-  return NextResponse.json({ model: { ...model, url: plantModelUrl(model.storage_path) } });
+  return NextResponse.json({
+      model: {
+        ...model,
+        url: plantModelUrl(model.storage_path),
+        posterUrl: plantModelPosterUrl(model.storage_path),
+      },
+    });
 }
 
 // Drop a model. Anything addable from the app has to be removable from the app,
@@ -305,7 +323,12 @@ export async function DELETE(req: NextRequest, { params }: RouteParams) {
       .select("id", { count: "exact", head: true })
       .eq("storage_path", path);
     if (!count) {
-      await supabase.storage.from(PLANT_MODELS_BUCKET).remove([path]);
+      // The poster is derived from this path, so it is only ever this model's
+      // and goes with it. Removing a path that was never written is a no-op,
+      // which is what happens for every model that has no thumbnail yet.
+      await supabase.storage
+        .from(PLANT_MODELS_BUCKET)
+        .remove([path, posterStoragePath(path)]);
     }
   }
 

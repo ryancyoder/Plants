@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Box, Loader2, Star, Trash2, Upload, X } from "lucide-react";
+import { Box, Image as ImageIcon, Loader2, Star, Trash2, Upload, X } from "lucide-react";
+import { captureAndSavePoster } from "@/components/modelPoster";
 import { supabase } from "@/lib/supabaseClient";
 import {
   MODEL_SCOPES,
@@ -11,10 +12,8 @@ import {
   looksLikeGlb,
   modelStandInLabel,
   type ModelScope,
-  type PlantModel,
+  type PlantModelWithUrls as ModelWithUrl,
 } from "@/lib/plantModels";
-
-type ModelWithUrl = PlantModel & { url?: string | null };
 
 // Add, promote and remove a plant's 3D models.
 //
@@ -117,6 +116,18 @@ export function PlantModelsEditor({
       }
       const d: { model: ModelWithUrl } = await res.json();
       setModels((xs) => [d.model, ...(xs ?? [])].sort(primaryFirst));
+
+      // Make the album tile's thumbnail now, while the model is loaded in this
+      // very tab. Best-effort on purpose: if the capture fails the model is
+      // still saved and the tile falls back to an icon, which is a far better
+      // outcome than refusing an upload over a picture of it.
+      if (d.model.url) {
+        setBusy("Thumbnail…");
+        const posterUrl = await captureAndSavePoster(plantId, d.model.id, d.model.url);
+        if (posterUrl) {
+          setModels((xs) => (xs ?? []).map((m) => (m.id === d.model.id ? { ...m, posterUrl } : m)));
+        }
+      }
       setCaption("");
       setSeason("");
       setHeightIn("");
@@ -177,6 +188,29 @@ export function PlantModelsEditor({
       );
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not update");
+    }
+  };
+
+  // Re-render one model's thumbnail. Needed because the two existing models
+  // predate posters entirely, and because a capture can come out wrong (a
+  // context lost mid-render gives a blank PNG, which looks like a bug in the
+  // album rather than in the capture).
+  const refreshPoster = async (m: ModelWithUrl) => {
+    if (!m.url) return;
+    setError(null);
+    setBusy("Thumbnail…");
+    try {
+      const posterUrl = await captureAndSavePoster(plantId, m.id, m.url);
+      if (!posterUrl) throw new Error("Could not render a thumbnail for that model.");
+      // Cache-bust: the path is derived from the model's, so a re-render
+      // overwrites the same object and the browser would keep showing the old
+      // picture.
+      const busted = `${posterUrl}?v=${Date.now()}`;
+      setModels((xs) => (xs ?? []).map((x) => (x.id === m.id ? { ...x, posterUrl: busted } : x)));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not render a thumbnail");
+    } finally {
+      setBusy(null);
     }
   };
 
@@ -262,6 +296,21 @@ export function PlantModelsEditor({
                       className="rounded px-1.5 py-0.5 text-[11px] font-medium text-blue-600 hover:bg-blue-50 disabled:opacity-50 dark:text-blue-400 dark:hover:bg-blue-950"
                     >
                       Make primary
+                    </button>
+                  )}
+                  {m.url && (
+                    <button
+                      type="button"
+                      onClick={() => refreshPoster(m)}
+                      disabled={!!busy}
+                      title={
+                        m.posterUrl
+                          ? "Re-render the album thumbnail"
+                          : "Render the album thumbnail"
+                      }
+                      className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] text-zinc-500 hover:bg-zinc-100 disabled:opacity-50 dark:text-zinc-400 dark:hover:bg-zinc-800"
+                    >
+                      <ImageIcon size={11} /> Thumbnail
                     </button>
                   )}
                   {m.url && (

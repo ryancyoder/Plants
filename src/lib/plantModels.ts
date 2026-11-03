@@ -63,6 +63,31 @@ export function plantModelUrl(storagePath: string | null | undefined): string | 
 // Where a plant's model goes. Foldered by id so the bucket can be read by a
 // human, and timestamped so uploading a replacement never overwrites the file a
 // row still points at — the old row is deleted explicitly or not at all.
+// ---------------------------------------------------------------------------
+// The thumbnail
+// ---------------------------------------------------------------------------
+
+// A GLB carries no still image, so an album tile has nothing to show until one
+// is rendered. The poster lives at a path *derived* from the model's own —
+// `518/model-123.glb` → `518/model-123.poster.png` — rather than in a column of
+// its own.
+//
+// Deriving it costs no extra round trip, needs no migration, and keeps the
+// bucket readable by eye: a model and its thumbnail sort next to each other
+// inside the plant's folder. The price is that "does this have a poster" can
+// only be answered by asking for the image, so a tile has to fall back to an
+// icon on a 404. That is the right failure for a thumbnail — the card still
+// works, it just has no picture — and it is the same bargain StampCard already
+// makes with a missing symbol image.
+export function posterStoragePath(modelStoragePath: string): string {
+  return `${modelStoragePath.replace(/\.(glb|gltf)$/i, "")}.poster.png`;
+}
+
+export function plantModelPosterUrl(storagePath: string | null | undefined): string | null {
+  if (!storagePath) return null;
+  return plantModelUrl(posterStoragePath(storagePath));
+}
+
 export function modelStoragePath(plantId: number, fileName: string): string {
   const ext = /\.gltf$/i.test(fileName) ? "gltf" : "glb";
   return `${plantId}/model-${Date.now()}.${ext}`;
@@ -149,6 +174,14 @@ export interface PlantModel {
 export const MODEL_COLUMNS =
   "id,plant_id,status,source,source_url,credit,license,model_scope,storage_path,format,bytes,triangles,height_in,season,caption,notes,created_at,reviewed_at";
 
+// A row as it leaves a route: the stored columns plus the two URLs derived from
+// `storage_path`. Spelled once here so the viewer, the editor and the album
+// section cannot disagree about whether `posterUrl` exists.
+export type PlantModelWithUrls = PlantModel & {
+  url?: string | null;
+  posterUrl?: string | null;
+};
+
 // ---------------------------------------------------------------------------
 // Validation
 // ---------------------------------------------------------------------------
@@ -182,6 +215,19 @@ export function looksLikeGlb(head: ArrayBuffer): boolean {
   if (view.getUint32(0, true) !== GLB_MAGIC) return false;
   const version = view.getUint32(4, true);
   return version === 1 || version === 2;
+}
+
+// A PNG begins with the 8-byte signature \x89PNG\r\n\x1a\n. The poster route
+// checks it for the same reason the model route checks for `glTF`: a signed
+// upload will faithfully store anything, and a tile pointing at a JPEG or an
+// error page is a broken image with nothing in the database looking wrong.
+export function looksLikePng(head: ArrayBuffer): boolean {
+  if (head.byteLength < 8) return false;
+  const b = new Uint8Array(head, 0, 8);
+  return (
+    b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47 &&
+    b[4] === 0x0d && b[5] === 0x0a && b[6] === 0x1a && b[7] === 0x0a
+  );
 }
 
 // A .gltf is JSON, so the only cheap structural check is that it parses and

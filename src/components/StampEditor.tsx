@@ -9,13 +9,16 @@ import {
   type LibraryItem,
   type LibraryItemData,
   type LibraryKind,
+  PP_LIBRARY_BUCKET,
 } from "@/lib/design/library";
 import { ReferencePlantPicker } from "@/components/ReferencePlantPicker";
+import { supabase } from "@/lib/supabaseClient";
 
-// Vercel rejects request bodies over ~4.5MB before the route runs. Symbols are
-// not run through compressImage: it re-encodes to JPEG, and a symbol is only
-// useful with its transparency intact.
-const MAX_BYTES = 4_000_000;
+// Symbols are not run through compressImage: it re-encodes to JPEG, and a symbol
+// is only useful with its transparency intact. Vercel rejects request bodies
+// over ~4.5MB, so the image does not go through the app: it is uploaded
+// straight to Storage via a signed URL (see save()).
+const MAX_BYTES = 7_000_000;
 
 interface Link {
   id: number;
@@ -115,7 +118,7 @@ export function StampEditor({
       return;
     }
     if (f.size > MAX_BYTES) {
-      setError(`That image is ${(f.size / 1_000_000).toFixed(1)}MB; the limit is 4MB.`);
+      setError(`That image is ${(f.size / 1_000_000).toFixed(1)}MB; the limit is 7MB.`);
       return;
     }
     try {
@@ -199,12 +202,27 @@ export function StampEditor({
         };
         // Same id shapes the design tool mints, so it cannot tell the difference.
         const id = `${kind === "plan-symbol" ? "plan" : "custom"}-${crypto.randomUUID()}`;
-        const fd = new FormData();
-        fd.append("file", file!);
-        fd.append("id", id);
-        fd.append("kind", kind);
-        fd.append("data", JSON.stringify(data));
-        res = await fetch("/api/design/library", { method: "POST", body: fd });
+        // Three steps, no body-size ceiling: get a signed URL, send the bytes
+        // straight to Storage, then register the row (metadata only).
+        const urlRes = await fetch("/api/design/library/upload-url", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ id, kind, fileName: file!.name }),
+        });
+        if (!urlRes.ok) {
+          const d = await urlRes.json().catch(() => ({}));
+          throw new Error(d.error || `Could not start the upload (${urlRes.status})`);
+        }
+        const { path, token } = (await urlRes.json()) as { path: string; token: string };
+        const { error: upErr } = await supabase.storage
+          .from(PP_LIBRARY_BUCKET)
+          .uploadToSignedUrl(path, token, file!, { contentType: file!.type || "image/png" });
+        if (upErr) throw new Error(upErr.message);
+        res = await fetch("/api/design/library", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ id, kind, data, image_path: path }),
+        });
       } else {
         res = await fetch(`/api/design/library/${encodeURIComponent(item!.id)}`, {
           method: "PATCH",
@@ -306,7 +324,7 @@ export function StampEditor({
                     </button>
                   </div>
                   <p className="text-xs text-zinc-400">
-                    A transparent PNG or WebP, up to 4MB.
+                    A transparent PNG or WebP, up to 7MB.
                     {size && ` ${size.width} × ${size.height}px.`}
                   </p>
                 </>

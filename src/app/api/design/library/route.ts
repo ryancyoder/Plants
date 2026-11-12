@@ -36,15 +36,39 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
-  const form = await req.formData();
-  const file = form.get("file");
-  const id = form.get("id");
-  const kind = form.get("kind");
-  const dataRaw = form.get("data");
+  // Two ways in. The multipart form (file + fields) is the original and still
+  // works for images that fit a serverless body. A JSON body registers an image
+  // the browser already uploaded straight to Storage through ./upload-url,
+  // which is how images over ~4.5MB get here.
+  const isJson = (req.headers.get("content-type") ?? "").includes("application/json");
 
-  if (!(file instanceof File)) {
-    return NextResponse.json({ error: "file is required" }, { status: 400 });
+  let file: File | null = null;
+  let id: unknown;
+  let kind: unknown;
+  let dataRaw: unknown;
+  let jsonPath: unknown;
+
+  if (isJson) {
+    const body = (await req.json().catch(() => null)) as Record<string, unknown> | null;
+    if (!body) {
+      return NextResponse.json({ error: "a JSON body is required" }, { status: 400 });
+    }
+    id = body.id;
+    kind = body.kind;
+    dataRaw = body.data;
+    jsonPath = body.image_path;
+  } else {
+    const form = await req.formData();
+    const f = form.get("file");
+    if (!(f instanceof File)) {
+      return NextResponse.json({ error: "file is required" }, { status: 400 });
+    }
+    file = f;
+    id = form.get("id");
+    kind = form.get("kind");
+    dataRaw = form.get("data");
   }
+
   if (typeof id !== "string" || !id) {
     return NextResponse.json({ error: "id is required" }, { status: 400 });
   }
@@ -54,21 +78,38 @@ export async function POST(req: NextRequest) {
 
   let data: LibraryItemData;
   try {
-    data = typeof dataRaw === "string" ? JSON.parse(dataRaw) : {};
+    data = typeof dataRaw === "string" ? JSON.parse(dataRaw) : ((dataRaw as LibraryItemData) ?? {});
   } catch {
     return NextResponse.json({ error: "data must be valid JSON" }, { status: 400 });
   }
 
   try {
-    const ext = safeExtension(file.name, "png");
-    const path = `${kind}/${id}.${ext}`;
+    let path: string;
+    if (file) {
+      const ext = safeExtension(file.name, "png");
+      path = `${kind}/${id}.${ext}`;
 
-    const { error: uploadError } = await supabase.storage
-      .from(PP_LIBRARY_BUCKET)
-      .upload(path, file, { contentType: file.type || "image/png", upsert: true });
+      const { error: uploadError } = await supabase.storage
+        .from(PP_LIBRARY_BUCKET)
+        .upload(path, file, { contentType: file.type || "image/png", upsert: true });
 
-    if (uploadError) {
-      return NextResponse.json({ error: uploadError.message }, { status: 500 });
+      if (uploadError) {
+        return NextResponse.json({ error: uploadError.message }, { status: 500 });
+      }
+    } else {
+      // The path was minted by ./upload-url as `${kind}/${id}.${ext}`. Re-check
+      // it, so a row can't point at some other item's object (a later delete
+      // would reclaim someone else's file), and that the bytes really arrived.
+      if (typeof jsonPath !== "string" || !new RegExp(`^${kind}/${id}\\.(png|webp|jpg|jpeg)$`).test(jsonPath)) {
+        return NextResponse.json({ error: "image_path does not belong to this item" }, { status: 400 });
+      }
+      path = jsonPath;
+      const { data: found, error: listError } = await supabase.storage
+        .from(PP_LIBRARY_BUCKET)
+        .list(kind, { search: path.slice(kind.length + 1), limit: 1 });
+      if (listError || !found?.some((o) => `${kind}/${o.name}` === path)) {
+        return NextResponse.json({ error: "the image was not uploaded" }, { status: 400 });
+      }
     }
 
     // Next sort_order for this kind, so items keep their add order.

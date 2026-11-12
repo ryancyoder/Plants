@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { X, Upload, Trash2, Loader2, Shapes, Search } from "lucide-react";
+import { X, Upload, Trash2, Loader2, Shapes, Search, ClipboardPaste } from "lucide-react";
 import type { Plant } from "@/lib/plants";
 import {
   STAMP_CATEGORIES,
@@ -127,6 +127,36 @@ export function StampEditor({
       setError(e instanceof Error ? e.message : "Could not read image");
     } finally {
       if (fileRef.current) fileRef.current.value = "";
+    }
+  };
+
+  // iOS draws the Photo Library / Take Photo / Choose File sheet for a file
+  // input itself, so a clipboard option can't be added to it -- this is a
+  // separate button. It must run from a tap; Safari then shows its own "Paste"
+  // confirmation before handing the clipboard over.
+  const pasteFromClipboard = async () => {
+    setError(null);
+    if (!navigator.clipboard?.read) {
+      setError("This browser can't paste images. Use Choose image instead.");
+      return;
+    }
+    try {
+      const items = await navigator.clipboard.read();
+      for (const clip of items) {
+        const type = clip.types.find((t) => t.startsWith("image/"));
+        if (!type) continue;
+        const blob = await clip.getType(type);
+        const ext = type.split("/")[1] || "png";
+        await onFile(new File([blob], `pasted-image.${ext}`, { type }));
+        return;
+      }
+      setError("No image on the clipboard.");
+    } catch (e) {
+      setError(
+        e instanceof DOMException && e.name === "NotAllowedError"
+          ? "Clipboard access was declined. Tap Paste again and allow it."
+          : "Could not read the clipboard.",
+      );
     }
   };
 
@@ -261,12 +291,20 @@ export function StampEditor({
                       if (f) onFile(f);
                     }}
                   />
-                  <button
-                    onClick={() => fileRef.current?.click()}
-                    className="inline-flex items-center gap-1.5 self-start rounded-full bg-zinc-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-zinc-800 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-white"
-                  >
-                    <Upload size={15} /> {file ? "Change image" : "Choose image"}
-                  </button>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      onClick={() => fileRef.current?.click()}
+                      className="inline-flex items-center gap-1.5 rounded-full bg-zinc-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-zinc-800 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-white"
+                    >
+                      <Upload size={15} /> {file ? "Change image" : "Choose image"}
+                    </button>
+                    <button
+                      onClick={pasteFromClipboard}
+                      className="inline-flex items-center gap-1.5 rounded-full border border-zinc-300 px-3 py-1.5 text-sm font-medium text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-800"
+                    >
+                      <ClipboardPaste size={15} /> Paste from clipboard
+                    </button>
+                  </div>
                   <p className="text-xs text-zinc-400">
                     A transparent PNG or WebP, up to 4MB.
                     {size && ` ${size.width} × ${size.height}px.`}

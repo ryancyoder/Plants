@@ -9,16 +9,16 @@ import {
   type LibraryItem,
   type LibraryItemData,
   type LibraryKind,
-  PP_LIBRARY_BUCKET,
 } from "@/lib/design/library";
 import { ReferencePlantPicker } from "@/components/ReferencePlantPicker";
-import { supabase } from "@/lib/supabaseClient";
 
-// Symbols are not run through compressImage: it re-encodes to JPEG, and a symbol
-// is only useful with its transparency intact. Vercel rejects request bodies
-// over ~4.5MB, so the image does not go through the app: it is uploaded
-// straight to Storage via a signed URL (see save()).
-const MAX_BYTES = 7_000_000;
+// Vercel rejects request bodies over ~4.5MB before the route runs. Symbols are
+// not run through compressImage: it re-encodes to JPEG, and a symbol is only
+// useful with its transparency intact. A bigger image is instead scaled down
+// (see shrinkToFit) until it fits under MAX_BYTES; MAX_INPUT_BYTES just stops
+// a runaway file from being decoded in the browser.
+const MAX_BYTES = 4_000_000;
+const MAX_INPUT_BYTES = 40_000_000;
 
 interface Link {
   id: number;
@@ -34,6 +34,42 @@ function linkFromPlant(p: Plant): Link {
 function fileStem(name: string): string {
   const dot = name.lastIndexOf(".");
   return (dot > 0 ? name.slice(0, dot) : name).trim();
+}
+
+// Scale an image down until it is under MAX_BYTES, keeping transparency.
+// PNG and WebP come out as PNG (canvas PNG is lossless and Safari cannot reliably
+// encode WebP); a JPEG stays a JPEG. Size roughly tracks pixel count, so each
+// pass aims at the target by area with a little headroom, and tries again if it
+// still lands over.
+async function shrinkToFit(f: File): Promise<File> {
+  const bitmap = await createImageBitmap(f);
+  try {
+    const asJpeg = f.type === "image/jpeg";
+    const outType = asJpeg ? "image/jpeg" : "image/png";
+    let scale = Math.min(1, Math.sqrt((MAX_BYTES * 0.9) / f.size));
+    for (let pass = 0; pass < 6; pass++) {
+      const w = Math.max(1, Math.round(bitmap.width * scale));
+      const h = Math.max(1, Math.round(bitmap.height * scale));
+      const canvas = document.createElement("canvas");
+      canvas.width = w;
+      canvas.height = h;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) break;
+      ctx.drawImage(bitmap, 0, 0, w, h);
+      const blob = await new Promise<Blob | null>((resolve) =>
+        canvas.toBlob(resolve, outType, asJpeg ? 0.9 : undefined),
+      );
+      if (!blob || blob.type !== outType) break;
+      if (blob.size <= MAX_BYTES) {
+        const ext = asJpeg ? "jpg" : "png";
+        return new File([blob], `${fileStem(f.name)}.${ext}`, { type: outType });
+      }
+      scale *= Math.sqrt((MAX_BYTES * 0.85) / blob.size);
+    }
+    throw new Error("That image is too large to shrink to 4MB. Try a smaller one.");
+  } finally {
+    bitmap.close?.();
+  }
 }
 
 function readDimensions(file: File): Promise<{ width: number; height: number }> {
@@ -93,9 +129,11 @@ export function StampEditor({
   const [size, setSize] = useState<{ width: number; height: number } | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
   const [picking, setPicking] = useState(false);
+  const [preparing, setPreparing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [shrunkNote, setShrunkNote] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   // The chosen file's preview URL is made when the file is chosen; release the
@@ -111,24 +149,35 @@ export function StampEditor({
     ? STAMP_CATEGORIES
     : [...STAMP_CATEGORIES, { id: category, label: `${category} (custom)`, group: "Custom" }];
 
-  const onFile = async (f: File) => {
+  const onFile = async (original: File) => {
     setError(null);
-    if (!/^image\/(png|webp|jpeg)$/.test(f.type)) {
+    setShrunkNote(null);
+    if (!/^image\/(png|webp|jpeg)$/.test(original.type)) {
       setError("Use a PNG or WebP (transparent), or a JPEG.");
       return;
     }
-    if (f.size > MAX_BYTES) {
-      setError(`That image is ${(f.size / 1_000_000).toFixed(1)}MB; the limit is 7MB.`);
+    if (original.size > MAX_INPUT_BYTES) {
+      setError(`That image is ${(original.size / 1_000_000).toFixed(0)}MB; the limit is 40MB.`);
       return;
     }
     try {
+      let f = original;
+      if (f.size > MAX_BYTES) {
+        setPreparing(true);
+        f = await shrinkToFit(f);
+        setShrunkNote(
+          `Shrunk from ${(original.size / 1_000_000).toFixed(1)}MB to ${(f.size / 1_000_000).toFixed(1)}MB to fit.`,
+        );
+      }
       setSize(await readDimensions(f));
       setFile(f);
       setPreview(URL.createObjectURL(f));
       if (!name.trim() && !link) setName(fileStem(f.name));
     } catch (e) {
+      setShrunkNote(null);
       setError(e instanceof Error ? e.message : "Could not read image");
     } finally {
+      setPreparing(false);
       if (fileRef.current) fileRef.current.value = "";
     }
   };
@@ -202,27 +251,12 @@ export function StampEditor({
         };
         // Same id shapes the design tool mints, so it cannot tell the difference.
         const id = `${kind === "plan-symbol" ? "plan" : "custom"}-${crypto.randomUUID()}`;
-        // Three steps, no body-size ceiling: get a signed URL, send the bytes
-        // straight to Storage, then register the row (metadata only).
-        const urlRes = await fetch("/api/design/library/upload-url", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ id, kind, fileName: file!.name }),
-        });
-        if (!urlRes.ok) {
-          const d = await urlRes.json().catch(() => ({}));
-          throw new Error(d.error || `Could not start the upload (${urlRes.status})`);
-        }
-        const { path, token } = (await urlRes.json()) as { path: string; token: string };
-        const { error: upErr } = await supabase.storage
-          .from(PP_LIBRARY_BUCKET)
-          .uploadToSignedUrl(path, token, file!, { contentType: file!.type || "image/png" });
-        if (upErr) throw new Error(upErr.message);
-        res = await fetch("/api/design/library", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ id, kind, data, image_path: path }),
-        });
+        const fd = new FormData();
+        fd.append("file", file!);
+        fd.append("id", id);
+        fd.append("kind", kind);
+        fd.append("data", JSON.stringify(data));
+        res = await fetch("/api/design/library", { method: "POST", body: fd });
       } else {
         res = await fetch(`/api/design/library/${encodeURIComponent(item!.id)}`, {
           method: "PATCH",
@@ -324,8 +358,10 @@ export function StampEditor({
                     </button>
                   </div>
                   <p className="text-xs text-zinc-400">
-                    A transparent PNG or WebP, up to 7MB.
+                    A transparent PNG or WebP. Anything over 4MB is shrunk to fit.
                     {size && ` ${size.width} × ${size.height}px.`}
+                    {preparing && " Shrinking…"}
+                    {shrunkNote && ` ${shrunkNote}`}
                   </p>
                 </>
               ) : (
